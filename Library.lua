@@ -106,6 +106,8 @@ do
 
 		Huds = {},
 
+		Resets = {},
+
 		SetFlags = {},
 
 		UnnamedConnections = 0,
@@ -1152,6 +1154,30 @@ do
 		return true
 	end
 
+	Library.RegisterReset = function(self, Item)
+		TableInsert(self.Resets, Item)
+		return Item
+	end
+
+	Library.ResetItem = function(self, Item)
+		if type(Item) ~= "table" or type(Item.Reset) ~= "function" then
+			return false
+		end
+
+		self:SafeCall(Item.Reset, Item)
+		self:Notification((Item.Name or "Element") .. " reset to default", 5, FromRGB(94, 213, 120))
+
+		return true
+	end
+
+	Library.ResetAll = function(self)
+		for Index, Item in self.Resets do
+			self:SafeCall(Item.Reset, Item)
+		end
+
+		return true
+	end
+
 	Library.RefreshConfigsList = function(self, Element)
 		local List = {}
 		local ReturnList = {}
@@ -1242,6 +1268,9 @@ do
 
 				Color = FromRGB(0, 0, 0),
 				HexValue = "000000",
+
+				Default = Data.Default,
+				DefaultAlpha = Data.Alpha,
 
 				Flag = Data.Flag,
 			}
@@ -2041,9 +2070,15 @@ do
 				Colorpicker:Set(Data.Default, Data.Alpha)
 			end
 
+			function Colorpicker:Reset()
+				Colorpicker:Set(Colorpicker.Default or FromRGB(255, 255, 255), Colorpicker.DefaultAlpha or 0)
+			end
+
 			function Colorpicker:SetVisibility(Bool)
 				Items["ColorpickerButton"].Instance.Visible = Bool
 			end
+
+			Library:RegisterReset(Colorpicker)
 
 			Library.SetFlags[Colorpicker.Flag] = function(Color, Alpha)
 				Colorpicker:Set(Color, Alpha)
@@ -2061,6 +2096,9 @@ do
 				Mode = "",
 
 				Flag = Data.Flag,
+
+				Default = Data.Default,
+				DefaultMode = Data.Mode or "Toggle",
 
 				Picking = false,
 				Value = "",
@@ -2697,9 +2735,19 @@ do
 				Keybind:Set({ Key = Data.Default, Mode = Data.Mode or "Toggle", Toggled = Data.Toggled })
 			end
 
+			function Keybind:Reset()
+				Keybind:Set({
+					Key = Keybind.Default,
+					Mode = Keybind.DefaultMode or "Toggle",
+					Toggled = false,
+				})
+			end
+
 			function Keybind:SetVisibility(Bool)
 				Items["KeyButton"].Instance.Visible = Bool
 			end
+
+			Library:RegisterReset(Keybind)
 
 			Library.SetFlags[Keybind.Flag] = function(Value)
 				Keybind:Set(Value)
@@ -4293,9 +4341,11 @@ do
 					PaddingBottom = UDimNew(0, 8),
 				})
 
-				Items["Topbar"] = Instances:Create("Frame", {
+				Items["Topbar"] = Instances:Create("TextButton", {
 					Parent = Items["Section"].Instance,
 					Name = "\0",
+					Text = "",
+					AutoButtonColor = false,
 					BorderColor3 = FromRGB(0, 0, 0),
 					Size = UDim2New(1, 0, 0, 25),
 					BorderSizePixel = 0,
@@ -4359,6 +4409,24 @@ do
 				})
 				Items["Text"]:AddToTheme({ TextColor3 = "Text" })
 
+				Items["Arrow"] = Instances:Create("TextLabel", {
+					Parent = Items["Topbar"].Instance,
+					Name = "\0",
+					FontFace = Library.Font,
+					TextColor3 = FromRGB(255, 255, 255),
+					BorderColor3 = FromRGB(0, 0, 0),
+					Text = "v",
+					AnchorPoint = Vector2New(1, 0.5),
+					Size = UDim2New(0, 0, 0, 15),
+					BackgroundTransparency = 1,
+					Position = UDim2New(1, -8, 0.5, -1),
+					BorderSizePixel = 0,
+					AutomaticSize = Enum.AutomaticSize.X,
+					TextSize = 12,
+					BackgroundColor3 = FromRGB(255, 255, 255),
+				})
+				Items["Arrow"]:AddToTheme({ TextColor3 = "Text" })
+
 				Items["Content"] = Instances:Create("Frame", {
 					Parent = Items["Section"].Instance,
 					Name = "\0",
@@ -4380,6 +4448,24 @@ do
 
 				Section.Items = Items
 			end
+
+			function Section:SetCollapsed(Bool)
+				Section.Collapsed = Bool
+				Items["Content"].Instance.Visible = not Bool
+				Items["Arrow"].Instance.Text = Bool and ">" or "v"
+				Items["Text"].Instance.TextTransparency = Bool and 0.4 or 0
+				Items["Liner"].Instance.BackgroundTransparency = Bool and 0.6 or 0
+			end
+
+			function Section:ToggleCollapsed()
+				Section:SetCollapsed(not Section.Collapsed)
+			end
+
+			Items["Topbar"]:Connect("MouseButton1Down", function()
+				Section:ToggleCollapsed()
+			end)
+
+			Section.Collapsed = false
 
 			TableInsert(Section.Page.Sections, Section)
 			return setmetatable(Section, Library.Sections)
@@ -4532,6 +4618,16 @@ do
 					Library:SafeCall(Toggle.Callback, Toggle.Value)
 				end
 			end
+
+			function Toggle:Reset()
+				Toggle:Set(Toggle.Default)
+			end
+
+			Items["Toggle"]:Connect("MouseButton2Down", function()
+				Library:ResetItem(Toggle)
+			end)
+
+			Library:RegisterReset(Toggle)
 
 			function Toggle:Colorpicker(Data)
 				Data = Data or {}
@@ -4869,6 +4965,16 @@ do
 			function Slider:SetVisibility(Bool)
 				Items["Slider"].Instance.Visible = Bool
 			end
+
+			function Slider:Reset()
+				Slider:Set(Slider.Default)
+			end
+
+			Items["RealSlider"]:Connect("MouseButton2Down", function()
+				Library:ResetItem(Slider)
+			end)
+
+			Library:RegisterReset(Slider)
 
 			Library.SetFlags[Slider.Flag] = function(Value)
 				Slider:Set(Value)
@@ -5434,6 +5540,33 @@ do
 				Items["Dropdown"].Instance.Visible = Bool
 			end
 
+			function Dropdown:Reset()
+				if Dropdown.Multi then
+					for Index, OptionData in Dropdown.Options do
+						OptionData.Selected = false
+						OptionData:Toggle("Inactive")
+					end
+
+					Dropdown.Value = {}
+					Library.Flags[Dropdown.Flag] = {}
+					Items["Value"].Instance.Text = ""
+
+					if Dropdown.Default then
+						Dropdown:Set(Dropdown.Default)
+					elseif Dropdown.Callback then
+						Library:SafeCall(Dropdown.Callback, Dropdown.Value)
+					end
+				elseif Dropdown.Default then
+					Dropdown:Set(Dropdown.Default)
+				end
+			end
+
+			Items["RealDropdown"]:Connect("MouseButton2Down", function()
+				Library:ResetItem(Dropdown)
+			end)
+
+			Library:RegisterReset(Dropdown)
+
 			Library.SetFlags[Dropdown.Flag] = function(Value)
 				Dropdown:Set(Value)
 			end
@@ -5705,6 +5838,12 @@ do
 				Textbox:Set(Textbox.Default)
 			end
 
+			function Textbox:Reset()
+				Textbox:Set(Textbox.Default or "")
+			end
+
+			Library:RegisterReset(Textbox)
+
 			Library.SetFlags[Textbox.Flag] = function(Value)
 				Textbox:Set(Value)
 			end
@@ -5748,6 +5887,14 @@ do
 					Mode = "Toggle",
 					Callback = function()
 						Library.MenuKeybind = Library.Flags["MenuKeybind"].Key
+					end,
+				})
+
+				SettingsSection:Button({
+					Name = "Reset all to default",
+					Callback = function()
+						Library:ResetAll()
+						Library:Notification("All elements reset to default", 5, FromRGB(94, 213, 120))
 					end,
 				})
 			end
