@@ -41,6 +41,7 @@ do
 	local MathFloor = math.floor
 	local MathAbs = math.abs
 	local MathSin = math.sin
+	local MathRound = math.round
 
 	local TableInsert = table.insert
 	local TableFind = table.find
@@ -89,6 +90,8 @@ do
 			Assets = "uip100/Assets",
 		},
 
+		Autoload = "uip100/autoload.txt",
+
 		-- Ignore below
 		Pages = {},
 		Sections = {},
@@ -100,6 +103,8 @@ do
 		ThemeItems = {},
 
 		OpenFrames = {},
+
+		Huds = {},
 
 		SetFlags = {},
 
@@ -448,14 +453,18 @@ do
 
 			local Set = function(Input)
 				local DragDelta = Input.Position - DragStart
-				local NewX = StartPosition.X.Offset + DragDelta.X
-				local NewY = StartPosition.Y.Offset + DragDelta.Y
+				local NewX = StartPosition.X + DragDelta.X
+				local NewY = StartPosition.Y + DragDelta.Y
 
 				local ScreenSize = Gui.Parent.AbsoluteSize
 				local GuiSize = Gui.AbsoluteSize
+				local Anchor = Gui.AnchorPoint
 
-				NewX = MathClamp(NewX, 0, ScreenSize.X - GuiSize.X)
-				NewY = MathClamp(NewY, 0, ScreenSize.Y - GuiSize.Y)
+				local MinX, MaxX = GuiSize.X * Anchor.X, ScreenSize.X - GuiSize.X * (1 - Anchor.X)
+				local MinY, MaxY = GuiSize.Y * Anchor.Y, ScreenSize.Y - GuiSize.Y * (1 - Anchor.Y)
+
+				NewX = MathClamp(NewX, MathMin(MinX, MaxX), MathMax(MinX, MaxX))
+				NewY = MathClamp(NewY, MathMin(MinY, MaxY), MathMax(MinY, MaxY))
 
 				Gui.Position = UDim2New(0, NewX, 0, NewY)
 			end
@@ -469,7 +478,15 @@ do
 				then
 					Dragging = true
 					DragStart = Input.Position
-					StartPosition = Gui.Position
+
+					local Absolute = Gui.AbsolutePosition - Gui.Parent.AbsolutePosition
+					local GuiSize = Gui.AbsoluteSize
+					local Anchor = Gui.AnchorPoint
+
+					StartPosition = Vector2New(
+						Absolute.X + GuiSize.X * Anchor.X,
+						Absolute.Y + GuiSize.Y * Anchor.Y
+					)
 
 					if InputChanged then
 						return
@@ -892,6 +909,8 @@ do
 					Config[Index] = Value
 				end
 			end
+
+			Config.HUD = Library:GetHudPositions()
 		end)
 
 		return HttpService:JSONEncode(Config)
@@ -921,6 +940,12 @@ do
 					SetFunction(Value)
 				end
 			end
+
+			if type(Decoded.HUD) == "table" then
+				for Index, Value in Decoded.HUD do
+					Library:SetHudPosition(Index, Value)
+				end
+			end
 		end)
 
 		return Success, Result
@@ -930,6 +955,201 @@ do
 		if isfile(Library.Folders.Configs .. "/" .. Config) then
 			delfile(Library.Folders.Configs .. "/" .. Config)
 		end
+	end
+
+	Library.GetAutoload = function(self)
+		if not isfile(self.Autoload) then
+			return nil
+		end
+
+		local Name = StringGSub(readfile(self.Autoload) or "", "^%s*(.-)%s*$", "%1")
+		Name = StringGSub(Name, "[^%w%s%-_]", "")
+
+		if Name == "" or not isfile(self.Folders.Configs .. "/" .. Name .. ".json") then
+			return nil
+		end
+
+		return Name
+	end
+
+	Library.SetAutoload = function(self, Name)
+		if type(Name) ~= "string" then
+			return false
+		end
+
+		Name = StringGSub(Name, "^%s*(.-)%s*$", "%1")
+		Name = StringGSub(Name, "[^%w%s%-_]", "")
+
+		if Name == "" or not isfile(self.Folders.Configs .. "/" .. Name .. ".json") then
+			return false
+		end
+
+		writefile(self.Autoload, Name)
+		return true
+	end
+
+	Library.RemoveAutoload = function(self)
+		if isfile(self.Autoload) then
+			delfile(self.Autoload)
+			return true
+		end
+
+		return false
+	end
+
+	Library.LoadAutoload = function(self)
+		local Name = self:GetAutoload()
+
+		if not Name then
+			return false
+		end
+
+		local Success, Result = self:LoadConfig(readfile(self.Folders.Configs .. "/" .. Name .. ".json"))
+
+		if Success then
+			self:Notification("Autoloaded " .. Name .. ".json", 5, FromRGB(94, 213, 120))
+		else
+			self:Notification("Failed to autoload " .. Name .. ".json", 5, FromRGB(255, 0, 0))
+		end
+
+		return Success, Result
+	end
+
+	Library.SanitizeName = function(self, Name)
+		if type(Name) ~= "string" then
+			return ""
+		end
+
+		Name = StringGSub(Name, "^%s*(.-)%s*$", "%1")
+		return StringGSub(Name, "[^%w%s%-_]", "")
+	end
+
+	Library.ConfigExists = function(self, Name)
+		Name = self:SanitizeName(Name)
+
+		if Name == "" then
+			return false
+		end
+
+		return isfile(self.Folders.Configs .. "/" .. Name .. ".json")
+	end
+
+	Library.RenameConfig = function(self, Old, New)
+		if not self:ConfigExists(Old) then
+			return false, "Config not found"
+		end
+
+		Old = self:SanitizeName(Old)
+		New = self:SanitizeName(New)
+
+		if New == "" then
+			return false, "Invalid name"
+		end
+
+		if New == Old then
+			return false, "Name is unchanged"
+		end
+
+		if isfile(self.Folders.Configs .. "/" .. New .. ".json") then
+			return false, "Config already exists"
+		end
+
+		writefile(self.Folders.Configs .. "/" .. New .. ".json", readfile(self.Folders.Configs .. "/" .. Old .. ".json"))
+		delfile(self.Folders.Configs .. "/" .. Old .. ".json")
+
+		if self:GetAutoload() == Old then
+			writefile(self.Autoload, New)
+		end
+
+		return true
+	end
+
+	Library.DuplicateConfig = function(self, Source, Destination)
+		if not self:ConfigExists(Source) then
+			return false, "Config not found", nil
+		end
+
+		Source = self:SanitizeName(Source)
+		Destination = self:SanitizeName(Destination)
+
+		if Destination == "" then
+			Destination = Source .. " copy"
+
+			local Index = 2
+
+			while isfile(self.Folders.Configs .. "/" .. Destination .. ".json") do
+				Destination = Source .. " copy " .. Index
+				Index = Index + 1
+			end
+		end
+
+		if isfile(self.Folders.Configs .. "/" .. Destination .. ".json") then
+			return false, "Config already exists", nil
+		end
+
+		writefile(
+			self.Folders.Configs .. "/" .. Destination .. ".json",
+			readfile(self.Folders.Configs .. "/" .. Source .. ".json")
+		)
+
+		return true, nil, Destination
+	end
+
+	Library.ExportConfig = function(self)
+		if type(setclipboard) ~= "function" then
+			return false, "Clipboard unavailable"
+		end
+
+		setclipboard(self:GetConfig())
+		return true
+	end
+
+	Library.ImportConfig = function(self, Content)
+		Content = Content or (type(getclipboard) == "function" and getclipboard())
+
+		if type(Content) ~= "string" or Content == "" then
+			return false, "Empty clipboard"
+		end
+
+		return self:LoadConfig(Content)
+	end
+
+	Library.RegisterHud = function(self, Name, Hud)
+		self.Huds[Name] = Hud
+	end
+
+	Library.GetHudPositions = function(self)
+		local Positions = {}
+
+		for Name, Hud in self.Huds do
+			local Position = Hud.Instance.Position
+
+			Positions[Name] = {
+				XScale = Position.X.Scale,
+				XOffset = MathRound(Position.X.Offset),
+				YScale = Position.Y.Scale,
+				YOffset = MathRound(Position.Y.Offset),
+			}
+		end
+
+		return Positions
+	end
+
+	Library.SetHudPosition = function(self, Name, Position)
+		local Hud = self.Huds[Name]
+
+		if not Hud or type(Position) ~= "table" then
+			return false
+		end
+
+		Hud.Instance.Position = UDim2New(
+			Position.XScale or 0,
+			Position.XOffset or 0,
+			Position.YScale or 0,
+			Position.YOffset or 0
+		)
+
+		return true
 	end
 
 	Library.RefreshConfigsList = function(self, Element)
@@ -1821,6 +2041,10 @@ do
 				Colorpicker:Set(Data.Default, Data.Alpha)
 			end
 
+			function Colorpicker:SetVisibility(Bool)
+				Items["ColorpickerButton"].Instance.Visible = Bool
+			end
+
 			Library.SetFlags[Colorpicker.Flag] = function(Color, Alpha)
 				Colorpicker:Set(Color, Alpha)
 			end
@@ -2473,6 +2697,10 @@ do
 				Keybind:Set({ Key = Data.Default, Mode = Data.Mode or "Toggle", Toggled = Data.Toggled })
 			end
 
+			function Keybind:SetVisibility(Bool)
+				Items["KeyButton"].Instance.Visible = Bool
+			end
+
 			Library.SetFlags[Keybind.Flag] = function(Value)
 				Keybind:Set(Value)
 			end
@@ -2576,6 +2804,9 @@ do
 			end
 
 			Watermark:SetText(Name)
+
+			Items["Watermark"]:MakeDraggable()
+			Library:RegisterHud("Watermark", Items["Watermark"])
 
 			return Watermark
 		end
@@ -2734,6 +2965,9 @@ do
 
 				return NewKey
 			end
+
+			Items["KeybindList"]:MakeDraggable()
+			Library:RegisterHud("KeybindList", Items["KeybindList"])
 
 			return KeybindList
 		end
@@ -4632,6 +4866,10 @@ do
 				Slider:Set(Slider.Default)
 			end
 
+			function Slider:SetVisibility(Bool)
+				Items["Slider"].Instance.Visible = Bool
+			end
+
 			Library.SetFlags[Slider.Flag] = function(Value)
 				Slider:Set(Value)
 			end
@@ -5192,6 +5430,10 @@ do
 
 			Library:Connect(Items["Search"].Instance:GetPropertyChangedSignal("Text"), ApplySearch)
 
+			function Dropdown:SetVisibility(Bool)
+				Items["Dropdown"].Instance.Visible = Bool
+			end
+
 			Library.SetFlags[Dropdown.Flag] = function(Value)
 				Dropdown:Set(Value)
 			end
@@ -5514,6 +5756,7 @@ do
 			do
 				local ConfigName
 				local ConfigSelected
+				local UpdateAutoloadLabel
 
 				local ConfigsSearchbox = ConfigsSection:Dropdown({
 					Name = "Profiles list",
@@ -5538,9 +5781,7 @@ do
 				ConfigsSection:Button({
 					Name = "Create",
 					Callback = function()
-						local NewName = type(ConfigName) == "string" and ConfigName or ""
-						NewName = (StringGSub(NewName, "^%s*(.-)%s*$", "%1"))
-						NewName = StringGSub(NewName, "[^%w%s%-_]", "")
+						local NewName = Library:SanitizeName(ConfigName)
 
 						if NewName == "" then
 							Library:Notification("Enter a valid config name", 5, FromRGB(255, 170, 0))
@@ -5567,6 +5808,7 @@ do
 							delfile(Library.Folders.Configs .. "/" .. ConfigSelected .. ".json")
 							Library:RefreshConfigsList(ConfigsSearchbox)
 							Library:Notification("Deleted config " .. ConfigSelected .. ".json", 5, FromRGB(255, 0, 0))
+							UpdateAutoloadLabel()
 						end
 					end,
 				})
@@ -5603,6 +5845,117 @@ do
 						Library:RefreshConfigsList(ConfigsSearchbox)
 					end,
 				})
+
+				ConfigsSection:Button({
+					Name = "Rename",
+					Callback = function()
+						if ConfigSelected == nil then
+							Library:Notification("Select a config to rename", 5, FromRGB(255, 170, 0))
+							return
+						end
+
+						local Success, Reason = Library:RenameConfig(ConfigSelected, ConfigName)
+
+						if not Success then
+							Library:Notification("Rename failed: " .. tostring(Reason), 5, FromRGB(255, 0, 0))
+							return
+						end
+
+						Library:RefreshConfigsList(ConfigsSearchbox)
+						Library:Notification(
+							"Renamed config to " .. Library:SanitizeName(ConfigName) .. ".json",
+							5,
+							FromRGB(94, 213, 120)
+						)
+						UpdateAutoloadLabel()
+					end,
+				})
+
+				ConfigsSection:Button({
+					Name = "Duplicate",
+					Callback = function()
+						if ConfigSelected == nil then
+							Library:Notification("Select a config to duplicate", 5, FromRGB(255, 170, 0))
+							return
+						end
+
+						local Success, Reason, NewName = Library:DuplicateConfig(ConfigSelected, ConfigName)
+
+						if not Success then
+							Library:Notification("Duplicate failed: " .. tostring(Reason), 5, FromRGB(255, 0, 0))
+							return
+						end
+
+						Library:RefreshConfigsList(ConfigsSearchbox)
+						Library:Notification("Created config " .. NewName .. ".json", 5, FromRGB(94, 213, 120))
+					end,
+				})
+
+				ConfigsSection:Button({
+					Name = "Export to clipboard",
+					Callback = function()
+						local Success, Reason = Library:ExportConfig()
+
+						if not Success then
+							Library:Notification("Export failed: " .. tostring(Reason), 5, FromRGB(255, 0, 0))
+							return
+						end
+
+						Library:Notification("Config copied to clipboard", 5, FromRGB(94, 213, 120))
+					end,
+				})
+
+				ConfigsSection:Button({
+					Name = "Import from clipboard",
+					Callback = function()
+						local Success, Reason = Library:ImportConfig()
+
+						if not Success then
+							Library:Notification("Import failed: " .. tostring(Reason), 5, FromRGB(255, 0, 0))
+							return
+						end
+
+						Library:Notification("Config imported from clipboard", 5, FromRGB(94, 213, 120))
+					end,
+				})
+
+				ConfigsSection:Button({
+					Name = "Set as autoload",
+					Callback = function()
+						local NewName = ConfigSelected or ConfigName
+
+						if not Library:SetAutoload(NewName) then
+							Library:Notification("Select or type an existing config name", 5, FromRGB(255, 170, 0))
+							return
+						end
+
+						Library:Notification("Autoload set to " .. NewName .. ".json", 5, FromRGB(94, 213, 120))
+						UpdateAutoloadLabel()
+					end,
+				})
+
+				ConfigsSection:Button({
+					Name = "Remove as autoload",
+					Callback = function()
+						if not Library:GetAutoload() then
+							Library:Notification("No autoload config set", 5, FromRGB(255, 170, 0))
+							return
+						end
+
+						Library:RemoveAutoload()
+						Library:Notification("Autoload removed", 5, FromRGB(255, 0, 0))
+						UpdateAutoloadLabel()
+					end,
+				})
+
+				local AutoloadLabel = ConfigsSection:Label("Autoload")
+
+				UpdateAutoloadLabel = function()
+					local Name = Library:GetAutoload()
+					AutoloadLabel:SetText(Name and ("Autoload: " .. Name) or "Autoload: none")
+				end
+
+				UpdateAutoloadLabel()
 
 				Library:RefreshConfigsList(ConfigsSearchbox)
 			end

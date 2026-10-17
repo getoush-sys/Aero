@@ -97,3 +97,5 @@ AimbotSection:Textbox({
 })
 
 Library:Notification("this is a notification", 5)
+
+Library:LoadAutoload()
