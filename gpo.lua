@@ -27,6 +27,46 @@ local function Call(Object, Method, ...)
 	return Result
 end
 
+local function FiniteNumber(N)
+	return type(N) == "number" and N == N and N > -math.huge and N < math.huge
+end
+
+local function ValidVec3(P)
+	return typeof(P) == "Vector3" and FiniteNumber(P.X) and FiniteNumber(P.Y) and FiniteNumber(P.Z)
+end
+
+local function SafePosOf(Part)
+	if not Part then return nil end
+	local Ok, Pos = pcall(function()
+		return Part.Position
+	end)
+	if not Ok or not ValidVec3(Pos) then return nil end
+	return Pos
+end
+
+local function CameraPos()
+	local Cam = workspace.CurrentCamera
+	if not Cam then return nil end
+	local Ok, Pos = pcall(function()
+		return Cam.CFrame.Position
+	end)
+	if not Ok or not ValidVec3(Pos) then return nil end
+	return Pos
+end
+
+local function DistSqBetween(A, B)
+	if not ValidVec3(A) or not ValidVec3(B) then return nil end
+	local DX, DY, DZ = A.X - B.X, A.Y - B.Y, A.Z - B.Z
+	local D = DX * DX + DY * DY + DZ * DZ
+	if not FiniteNumber(D) then return nil end
+	return D
+end
+
+local function SafeStuds(D)
+	if not FiniteNumber(D) then return nil end
+	return math.floor(D + 0.5)
+end
+
 local function ToKeybindCode(KeyString)
 	local Key = tostring(KeyString or "F4"):upper()
 	local EnumMapping = {
@@ -2458,7 +2498,7 @@ function Esp.Update()
     end
 
     local Root = Utils.GetRoot()
-    local RootPosition = Root and Root.Position
+    local RootPosition = SafePosOf(Root) or CameraPos()
 
     for Value, Object in pairs(Esp.Objects) do
         if not Value:IsDescendantOf(Services.ReplicatedStorage) then
@@ -2467,7 +2507,13 @@ function Esp.Update()
         else
             pcall(function()
                 local Target = Value.Value
-                local Distance = RootPosition and math.floor((RootPosition - Target).Magnitude)
+                if not ValidVec3(Target) then
+                    Object.Visible = false
+                    return
+                end
+
+                local DistSq = RootPosition and DistSqBetween(RootPosition, Target) or nil
+                local Distance = DistSq and math.floor(math.sqrt(DistSq) + 0.5) or nil
 
                 if Esp.MaxDistance > 0 and Distance and Distance > Esp.MaxDistance then
                     Object.Visible = false
@@ -3245,7 +3291,9 @@ end
 Shared.Scratch = Scratch
 
 local function FormatTag(Current, Max)
-	return "[" .. math.ceil(Current) .. "/" .. math.ceil(Max) .. "]"
+	local C = FiniteNumber(Current) and math.ceil(Current) or 0
+	local M = FiniteNumber(Max) and math.ceil(Max) or 0
+	return "[" .. C .. "/" .. M .. "]"
 end
 
 local function CandidateBefore(A, B)
@@ -3310,7 +3358,7 @@ local function GetPartyValue(Player)
 end
 
 local function FormatNumber(N)
-	if N == nil then return "?" end
+	if not FiniteNumber(N) then return "?" end
 	if N >= 1e9 then return ("%.1fB"):format(N / 1e9) end
 	if N >= 1e6 then return ("%.1fM"):format(N / 1e6) end
 	if N >= 1e4 then return ("%.1fK"):format(N / 1e3) end
@@ -3545,7 +3593,12 @@ local function SetEspDistance(ED, On, Dist, Color)
 		return
 	end
 	if not DistLbl.Visible then DistLbl.Visible = true end
-	local T = math.floor(Dist + 0.5) .. " studs"
+	local Studs = SafeStuds(Dist)
+	if not Studs then
+		if ED.LastDistTxt ~= "" then DistLbl.Text = ""; ED.LastDistTxt = "" end
+		return
+	end
+	local T = Studs .. " studs"
 	if T ~= ED.LastDistTxt then DistLbl.Text = T; ED.LastDistTxt = T end
 	if Color and DistLbl.TextColor3 ~= Color then DistLbl.TextColor3 = Color end
 end
@@ -3953,15 +4006,16 @@ local function UpdateEsp()
 	local MyRoot = MyChar and GetRoot(MyChar)
 	if not MyRoot then return end
 	local Cam = workspace.CurrentCamera
-	local MyBase = MyRoot.Position
+	local MyBase = SafePosOf(MyRoot)
 	if Cam then
 		local Subj = Cam.CameraSubject
 		local MyHum = MyChar:FindFirstChildOfClass("Humanoid")
 		if Subj and Subj ~= MyHum then
-			MyBase = Cam.CFrame.Position
+			MyBase = CameraPos()
 		end
 	end
-	local MyPos = MyBase
+	local MyPos = MyBase or CameraPos()
+	if not MyPos then return end
 	local CamCF = Cam and Cam.CFrame
 	local MaxDistSq = Esp.MaxDist * Esp.MaxDist
 	local NameSpace = math.max(EspLayout.NameSpace, math.floor(EspLayout.NameSpace * Shared.EspSize))
@@ -3975,10 +4029,9 @@ local function UpdateEsp()
 			local Ok, Err = pcall(function()
 				local Char, Root = GetCharacterWithRoot(Player)
 				if not Char or not Char.Parent or not Root then return end
-				local RPos = Root.Position
-				local DX, DY, DZ = RPos.X - MyPos.X, RPos.Y - MyPos.Y, RPos.Z - MyPos.Z
-				local DistSq = DX*DX + DY*DY + DZ*DZ
-				if DistSq <= MaxDistSq and InFront(RPos, CamCF) then
+				local RPos = SafePosOf(Root)
+				local DistSq = RPos and DistSqBetween(RPos, MyPos) or nil
+				if DistSq and DistSq <= MaxDistSq and InFront(RPos, CamCF) then
 					PD0.CPass = PassId
 					PD0.CDist = math.sqrt(DistSq)
 					PD0.CChar = Char
@@ -4027,7 +4080,7 @@ local function UpdateEsp()
 				Hum = Char:FindFirstChildOfClass("Humanoid")
 				if Hum then PD.Hum = Hum end
 			end
-			local HasHum = Hum and Hum.MaxHealth > 0
+			local HasHum = Hum and FiniteNumber(Hum.Health) and FiniteNumber(Hum.MaxHealth) and Hum.MaxHealth > 0
 			local StamV, StamMax = GetStaminaBar(Player)
 			if not HasHum then StamV, StamMax = nil, nil end
 			local HasStam = StamV ~= nil and StamMax ~= nil
@@ -4069,8 +4122,14 @@ local function UpdateEsp()
 			end
 			if PD.DistLbl then
 				if Esp.Dist then
-					local DT = math.floor(Dist + 0.5) .. " studs"
-					if DT ~= PD.LastDistTxt then PD.DistLbl.Text = DT; PD.LastDistTxt = DT end
+					local Studs = SafeStuds(Dist)
+					if Studs then
+						local DT = Studs .. " studs"
+						if DT ~= PD.LastDistTxt then PD.DistLbl.Text = DT; PD.LastDistTxt = DT end
+					elseif PD.LastDistTxt ~= "" then
+						PD.DistLbl.Text = ""
+						PD.LastDistTxt = ""
+					end
 				elseif PD.LastDistTxt ~= "" then
 					PD.DistLbl.Text = ""
 					PD.LastDistTxt = ""
@@ -4446,7 +4505,8 @@ local function UpdateChestEsp()
 	local MyChar = LP.Character
 	local MyRoot = MyChar and GetRoot(MyChar)
 	if not MyRoot then return end
-	local MyPos = MyRoot.Position
+	local MyPos = SafePosOf(MyRoot) or CameraPos()
+	if not MyPos then return end
 	local MaxDistSq = ChestEsp.MaxDist * ChestEsp.MaxDist
 	local Cam = workspace.CurrentCamera
 	local CamCF = Cam and Cam.CFrame
@@ -4480,10 +4540,9 @@ local function UpdateChestEsp()
 		end
 	end
 	for P, ED in pairs(ChestEsp.Entities) do
-		local RPos = P.Position
-		local DX, DY, DZ = RPos.X - MyPos.X, RPos.Y - MyPos.Y, RPos.Z - MyPos.Z
-		local DistSq = DX * DX + DY * DY + DZ * DZ
-		if DistSq > MaxDistSq or not InFront(RPos, CamCF) then
+		local RPos = SafePosOf(P)
+		local DistSq = RPos and DistSqBetween(RPos, MyPos) or nil
+		if not DistSq or DistSq > MaxDistSq or not InFront(RPos, CamCF) then
 			if ED.Bill and ED.Bill.Enabled then ED.Bill.Enabled = false end
 		else
 			pcall(function()
@@ -4699,7 +4758,8 @@ local function UpdateIslandEsp()
 	if not C then return end
 	local MyRoot = GetRoot(GetCharacter(LP))
 	if not MyRoot then return end
-	local MyPos = MyRoot.Position
+	local MyPos = SafePosOf(MyRoot) or CameraPos()
+	if not MyPos then return end
 	local MaxDistSq = IslandEsp.MaxDist * IslandEsp.MaxDist
 	local Cam = workspace.CurrentCamera
 	local CamCF = Cam and Cam.CFrame
@@ -4710,10 +4770,9 @@ local function UpdateIslandEsp()
 		local Base = Info and Info.Base
 		if Base and Base.Parent then
 			local ED = IslandEsp.Entities[Inst]
-			local RPos = Base.Position
-			local DX, DY, DZ = RPos.X - MyPos.X, RPos.Y - MyPos.Y, RPos.Z - MyPos.Z
-			local DistSq = DX * DX + DY * DY + DZ * DZ
-			local Show = DistSq <= MaxDistSq and InFront(RPos, CamCF)
+			local RPos = SafePosOf(Base)
+			local DistSq = RPos and DistSqBetween(RPos, MyPos) or nil
+			local Show = DistSq ~= nil and DistSq <= MaxDistSq and InFront(RPos, CamCF)
 			if not ED or not ED.Bill or ED.Bill.Adornee ~= Base then
 				if ED and ED.Bill then pcall(function() ED.Bill:Destroy() end) end
 				if Show then
@@ -4976,7 +5035,8 @@ local function UpdateEntityEsp()
 	local MyChar = LP.Character
 	local MyRoot = MyChar and GetRoot(MyChar)
 	if not MyRoot then return end
-	local MyPos = MyRoot.Position
+	local MyPos = SafePosOf(MyRoot) or CameraPos()
+	if not MyPos then return end
 	local Cam = workspace.CurrentCamera
 	local CamCF = Cam and Cam.CFrame
 	if Now - (LastTick.EntityScan or 0) > 0.5 then
@@ -5033,11 +5093,10 @@ local function UpdateEntityEsp()
 						ED = Mod.Entities[M]
 						if not ED then return end
 					end
-					local RPos = Root.Position
-					local DX, DY, DZ = RPos.X - MyPos.X, RPos.Y - MyPos.Y, RPos.Z - MyPos.Z
-					local DistSq = DX * DX + DY * DY + DZ * DZ
-					local Dist = math.sqrt(DistSq)
-					if DistSq > MaxDistSq or not InFront(RPos, CamCF) then
+					local RPos = SafePosOf(Root)
+					local DistSq = RPos and DistSqBetween(RPos, MyPos) or nil
+					local Dist = DistSq and math.sqrt(DistSq) or nil
+					if not DistSq or DistSq > MaxDistSq or not InFront(RPos, CamCF) then
 						if ED.Bill.Enabled then ED.Bill.Enabled = false end
 						return
 					end
@@ -5052,7 +5111,7 @@ local function UpdateEntityEsp()
 					end
 					Scratch.n = 0
 					if Mod.Name then PushText(M.Name) end
-					if Mod.HP and Hum and Hum.MaxHealth > 0 then
+					if Mod.HP and Hum and FiniteNumber(Hum.Health) and FiniteNumber(Hum.MaxHealth) and Hum.MaxHealth > 0 then
 						local Pct = math.floor(math.clamp(Hum.Health / Hum.MaxHealth, 0, 1) * 100 + 0.5)
 						if ED.LastPct ~= Pct then
 							ED.LastPct = Pct
@@ -5294,7 +5353,8 @@ local function UpdateVendingEsp()
 	local MyChar = LP.Character
 	local MyRoot = MyChar and GetRoot(MyChar)
 	if not MyRoot then return end
-	local MyPos = MyRoot.Position
+	local MyPos = SafePosOf(MyRoot) or CameraPos()
+	if not MyPos then return end
 	local MaxDistSq = VendEsp.MaxDist * VendEsp.MaxDist
 	local Cam = workspace.CurrentCamera
 	local CamCF = Cam and Cam.CFrame
@@ -5333,11 +5393,10 @@ local function UpdateVendingEsp()
 				ED = VendEsp.Entities[M]
 				if not ED then return end
 			end
-			local RPos = Root.Position
-			local DX, DY, DZ = RPos.X - MyPos.X, RPos.Y - MyPos.Y, RPos.Z - MyPos.Z
-			local DistSq = DX * DX + DY * DY + DZ * DZ
-			local Dist = math.sqrt(DistSq)
-			if DistSq > MaxDistSq or not InFront(RPos, CamCF) then
+			local RPos = SafePosOf(Root)
+			local DistSq = RPos and DistSqBetween(RPos, MyPos) or nil
+			local Dist = DistSq and math.sqrt(DistSq) or nil
+			if not DistSq or DistSq > MaxDistSq or not InFront(RPos, CamCF) then
 				if ED.Bill.Enabled then ED.Bill.Enabled = false end
 				return
 			end
@@ -5499,7 +5558,8 @@ local function UpdateMedalEsp()
 	if not C then return end
 	local MyRoot = GetRoot(GetCharacter(LP))
 	if not MyRoot then return end
-	local MyPos = MyRoot.Position
+	local MyPos = SafePosOf(MyRoot) or CameraPos()
+	if not MyPos then return end
 	local MaxDistSq = MedalEsp.MaxDist * MedalEsp.MaxDist
 	local Cam = workspace.CurrentCamera
 	local CamCF = Cam and Cam.CFrame
@@ -5510,10 +5570,9 @@ local function UpdateMedalEsp()
 		local Base = MT and MT.Base
 		if Base and Base.Parent then
 			local ED = MedalEsp.Entities[M]
-			local RPos = Base.Position
-			local DX, DY, DZ = RPos.X - MyPos.X, RPos.Y - MyPos.Y, RPos.Z - MyPos.Z
-			local DistSq = DX * DX + DY * DY + DZ * DZ
-			local Show = DistSq <= MaxDistSq and InFront(RPos, CamCF)
+			local RPos = SafePosOf(Base)
+			local DistSq = RPos and DistSqBetween(RPos, MyPos) or nil
+			local Show = DistSq ~= nil and DistSq <= MaxDistSq and InFront(RPos, CamCF)
 			if not ED or not ED.Bill or ED.Bill.Adornee ~= Base then
 				if ED and ED.Bill then pcall(function() ED.Bill:Destroy() end) end
 				if Show then
