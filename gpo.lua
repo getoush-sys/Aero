@@ -234,15 +234,6 @@ local Movement = {
     WalkSpeed = 60,
 }
 
-local Esp = {
-    Enabled = false,
-    ShowDistance = false,
-    MaxDistance = 50000,
-    Color = Color3.fromRGB(255, 255, 255),
-    Objects = {},
-    Connections = {},
-}
-
 local HalloweenFarm = {
     Enabled = false,
     Interval = 0.25,
@@ -2429,136 +2420,6 @@ function Movement.Update(Dt)
     end
 end
 
-function Esp.Remove(Object)
-    if Object then
-        pcall(function()
-            Object:Remove()
-        end)
-    end
-end
-
-function Esp.Create(Value)
-    if not Value:IsA("Vector3Value") or Esp.Objects[Value] then
-        return
-    end
-
-    local Success, Object = pcall(function()
-        local Text = Drawing.new("Text")
-        Text.Text = Value.Name
-        Text.Size = 15
-        Text.Center = true
-        Text.Outline = true
-        Text.Color = Esp.Color
-        Text.Visible = false
-
-        pcall(function()
-            Text.Font = 3
-        end)
-
-        return Text
-    end)
-
-    if Success and Object then
-        Esp.Objects[Value] = Object
-    end
-end
-
-function Esp.Refresh()
-    local CompassGuider = Services.ReplicatedStorage:FindFirstChild("CompassGuider")
-
-    if not CompassGuider then
-        return
-    end
-
-    for _, Value in ipairs(CompassGuider:GetDescendants()) do
-        if Value:IsA("Vector3Value") then
-            Esp.Create(Value)
-        end
-    end
-end
-
-function Esp.HideAll()
-    for _, Object in pairs(Esp.Objects) do
-        pcall(function()
-            Object.Visible = false
-        end)
-    end
-end
-
-function Esp.Update()
-    if not Esp.Enabled then
-        return
-    end
-
-    local Camera = Services.Workspace.CurrentCamera
-
-    if not Camera then
-        Esp.HideAll()
-        return
-    end
-
-    local Root = Utils.GetRoot()
-    local RootPosition = SafePosOf(Root) or CameraPos()
-
-    for Value, Object in pairs(Esp.Objects) do
-        if not Value:IsDescendantOf(Services.ReplicatedStorage) then
-            Esp.Remove(Object)
-            Esp.Objects[Value] = nil
-        else
-            pcall(function()
-                local Target = Value.Value
-                if not ValidVec3(Target) then
-                    Object.Visible = false
-                    return
-                end
-
-                local DistSq = RootPosition and DistSqBetween(RootPosition, Target) or nil
-                local Distance = DistSq and math.floor(math.sqrt(DistSq) + 0.5) or nil
-
-                if Esp.MaxDistance > 0 and Distance and Distance > Esp.MaxDistance then
-                    Object.Visible = false
-                    return
-                end
-
-                local Position, OnScreen = Camera:WorldToViewportPoint(Target)
-
-                if OnScreen and Position.Z > 0 then
-                    local Label = Value.Name
-
-                    if Esp.ShowDistance and Distance then
-                        Label = Label .. " [" .. Distance .. " studs]"
-                    end
-
-                    Object.Text = Label
-                    Object.Color = Esp.Color
-                    Object.Position = Vector2.new(Position.X, Position.Y)
-                    Object.Visible = true
-                else
-                    Object.Visible = false
-                end
-            end)
-        end
-    end
-end
-
-function Esp.Cleanup()
-    Esp.Enabled = false
-
-    for _, Object in pairs(Esp.Objects) do
-        Esp.Remove(Object)
-    end
-    table.clear(Esp.Objects)
-
-    for _, Connection in pairs(Esp.Connections) do
-        pcall(function()
-            if typeof(Connection) == "RBXScriptConnection" and Connection.Connected then
-                Connection:Disconnect()
-            end
-        end)
-    end
-    table.clear(Esp.Connections)
-end
-
 local PikaFly = {
     Enabled = false,
     Installed = false,
@@ -3061,7 +2922,7 @@ local Pages = {
 	Fishing = Window:Page({ Name = "Fishing", Columns = 2 }),
 	Halloween = Window:Page({ Name = "Halloween", Columns = 2 }),
 	Player = Window:Page({ Name = "Player", Columns = 2 }),
-	Visuals = Window:Page({ Name = "Visuals", Columns = 1 }),
+	Visuals = Window:Page({ Name = "Visuals", Columns = 2 }),
 	Utils = Window:Page({ Name = "Utils", Columns = 2 }),
 }
 
@@ -3075,7 +2936,6 @@ local Sections = {
 	CandyWebhook = Pages.Halloween:Section({ Name = "Candy Webhook", Side = 2 }),
 	Player = Pages.Player:Section({ Name = "Player", Side = 1 }),
 	Movement = Pages.Player:Section({ Name = "Movement", Side = 2 }),
-	Islands = Pages.Visuals:Section({ Name = "Islands", Side = 1 }),
 	PikaFly = Pages.Utils:Section({ Name = "Pika V2", Side = 1 }),
 	PikaV1 = Pages.Utils:Section({ Name = "Pika V1", Side = 2 }),
 }
@@ -3107,32 +2967,8 @@ Sections.PikaFly:Toggle({ Name = "Better Pika v2 Fly", Flag = "PikaFlyToggle", D
 Sections.PikaFly:Slider({ Name = "Fly Speed", Flag = "PikaFlySpeed", Default = 2, Min = 0.1, Max = 2, Decimals = 1, Callback = Safe(function(Value) PikaFly.Speed = math.clamp(tonumber(Value) or PikaFly.MaxSpeed, 0.1, PikaFly.MaxSpeed) end) })
 Sections.PikaV1:Toggle({ Name = "Better Pika v1 Fly", Flag = "PikaV1FlyToggle", Default = false, Callback = Safe(PikaV1.SetEnabled) })
 Sections.PikaV1:Slider({ Name = "Fly Speed", Flag = "PikaV1FlySpeed", Default = 2.5, Min = 0.1, Max = 2.5, Decimals = 1, Callback = Safe(function(Value) PikaV1.Speed = math.clamp(tonumber(Value) or PikaV1.MaxSpeed, 0.1, PikaV1.MaxSpeed) end) })
-Sections.Islands:Toggle({ Name = "ESP Islands", Flag = "EspIslands", Default = false, Callback = Safe(function(Value) Esp.Enabled = Value if Value then Esp.Refresh() else Esp.HideAll() end Utils.NotifyToggle("ESP Islands", Value) end) })
-Sections.Islands:Slider({ Name = "Max Distance", Flag = "EspMaxDistance", Default = 50000, Min = 1, Max = 50000, Decimals = 0, Suffix = " studs", Callback = Safe(function(Value) Esp.MaxDistance = Value end) })
-do
-	local EspColorLabel = Sections.Islands:Label("ESP Color")
-	EspColorLabel:Colorpicker({ Name = "ESP Color", Flag = "EspColor", Default = Color3.fromRGB(255, 255, 255), Callback = Safe(function(Color) Esp.Color = Color for _, Object in pairs(Esp.Objects) do pcall(function() Object.Color = Color end) end end) })
-end
-Sections.Islands:Dropdown({ Name = "ESP Options", Flag = "EspIslandsOptions", Items = { "Show Distance" }, Default = {}, Multi = true, Callback = Safe(function(Values) if type(Values) == "table" then Esp.ShowDistance = table.find(Values, "Show Distance") ~= nil or Values["Show Distance"] == true else Esp.ShowDistance = Values == "Show Distance" or Values == true end end) })
-
 Utils.Give(Services.RunService.RenderStepped:Connect(function(Dt) pcall(Movement.Update, Dt) end))
 Utils.Give(Player.Object.CharacterAdded:Connect(function(Character) pcall(function() local Humanoid = Character:WaitForChild("Humanoid", 10) if Humanoid and Movement.Fly then Humanoid.PlatformStand = true end end) end))
-
-task.spawn(function()
-	local CompassGuider
-	while Utils.Running and not CompassGuider do
-		CompassGuider = Services.ReplicatedStorage:FindFirstChild("CompassGuider")
-		if not CompassGuider then task.wait(5) end
-	end
-	if not CompassGuider or not Utils.Running then return end
-	pcall(function()
-		table.insert(Connections, CompassGuider.DescendantAdded:Connect(function(Value) pcall(function() if Value:IsA("Vector3Value") then Esp.Create(Value) end end) end))
-		table.insert(Connections, CompassGuider.DescendantRemoving:Connect(function(Value) pcall(function() local Object = Esp.Objects[Value] if Object then Esp.Remove(Object) Esp.Objects[Value] = nil end end) end))
-	end)
-	pcall(Esp.Refresh)
-end)
-
-table.insert(Connections, Services.RunService.RenderStepped:Connect(function() pcall(Esp.Update) end))
 
 task.spawn(function()
 	while Utils.Running do
@@ -3152,13 +2988,12 @@ local function Unload()
 	Movement.Fly = false Movement.Walk = false
 	HalloweenFarm.Enabled = false HalloweenFarm.Busy = false pcall(HalloweenFarm.StopHover) pcall(HalloweenFarm.ClearHighlights, true)
 	pcall(function() local Humanoid = Utils.GetHumanoid() if Humanoid then Humanoid.PlatformStand = false end end)
-	pcall(Esp.Cleanup)
 	for _, Conn in pairs(Connections) do pcall(function() if Conn and Conn.Connected then Conn:Disconnect() end end) end
 	table.clear(Connections)
 end
 
-do
-local EspPage = Window:Page({ Name = "ESP", Columns = 2 })
+local function InitVisuals(Page)
+local EspPage = Page
 
 local Services = {
 	Players = game:GetService("Players"),
@@ -6161,8 +5996,9 @@ SectionGeppo:Toggle({
 		end
 	end,
 })
-
 end
+
+InitVisuals(Pages.Visuals)
 
 local SettingsPage = Library:CreateSettingsPage(Window, KeybindList, Watermark)
 
