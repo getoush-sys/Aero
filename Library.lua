@@ -803,8 +803,16 @@ do
 	end
 
 	Library.Round = function(self, Number, Float)
-		local Multiplier = 1 / (Float or 1)
-		return MathFloor(Number * Multiplier) / Multiplier
+		Number = tonumber(Number) or 0
+
+		local Multiplier = 10 ^ (tonumber(Float) or 0)
+		local Result = MathFloor(Number * Multiplier + 0.5) / Multiplier
+
+		if Result ~= Result then
+			return 0
+		end
+
+		return Result
 	end
 
 	Library.Thread = function(self, Function)
@@ -4783,7 +4791,7 @@ do
 				Name = Data.Name or Data.name or "Slider",
 				Flag = Data.Flag or Data.flag or Library:NextFlag(),
 				Min = Data.Min or Data.min or 0,
-				Decimals = Data.Decimals or Data.decimals or 1,
+				Decimals = Data.Decimals or Data.decimals or 0,
 				Suffix = Data.Suffix or Data.suffix or "",
 				Max = Data.Max or Data.max or 100,
 				Default = Data.Default or Data.Default or 0,
@@ -4896,12 +4904,25 @@ do
 			end
 
 			function Slider:Set(Value)
+				Value = tonumber(Value)
+
+				if not Value or Value ~= Value then
+					return
+				end
+
 				Slider.Value = MathClamp(Library:Round(Value, Slider.Decimals), Slider.Min, Slider.Max)
 				Library.Flags[Slider.Flag] = Slider.Value
 
+				local Range = Slider.Max - Slider.Min
+				local Ratio = 0
+
+				if Range ~= 0 then
+					Ratio = MathClamp((Slider.Value - Slider.Min) / Range, 0, 1)
+				end
+
 				Items["Accent"]:Tween(
 					TweenInfo.new(Library.Tween.Time, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-					{ Size = UDim2New((Slider.Value - Slider.Min) / (Slider.Max - Slider.Min), -2, 1, -2) }
+					{ Size = UDim2New(Ratio, -2, 1, -2) }
 				)
 				Items["Value"].Instance.Text = StringFormat("%s%s", Slider.Value, Slider.Suffix)
 
@@ -4925,8 +4946,13 @@ do
 				then
 					Slider.Sliding = true
 
-					local SizeX = (Input.Position.X - Items["RealSlider"].Instance.AbsolutePosition.X)
-						/ Items["RealSlider"].Instance.AbsoluteSize.X
+					local Width = Items["RealSlider"].Instance.AbsoluteSize.X
+
+					if Width <= 0 then
+						return
+					end
+
+					local SizeX = MathClamp((Input.Position.X - Items["RealSlider"].Instance.AbsolutePosition.X) / Width, 0, 1)
 					local Value = ((Slider.Max - Slider.Min) * SizeX) + Slider.Min
 
 					Slider:Set(Value)
@@ -4949,8 +4975,13 @@ do
 			Library:Connect(UserInputService.InputChanged, function(Input)
 				if Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch then
 					if Slider.Sliding then
-						local SizeX = (Input.Position.X - Items["RealSlider"].Instance.AbsolutePosition.X)
-							/ Items["RealSlider"].Instance.AbsoluteSize.X
+						local Width = Items["RealSlider"].Instance.AbsoluteSize.X
+
+						if Width <= 0 then
+							return
+						end
+
+						local SizeX = MathClamp((Input.Position.X - Items["RealSlider"].Instance.AbsolutePosition.X) / Width, 0, 1)
 						local Value = ((Slider.Max - Slider.Min) * SizeX) + Slider.Min
 
 						Slider:Set(Value)
